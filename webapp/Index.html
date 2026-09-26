@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f6fb; --card: #fff; --text: #1f2937; --muted: #6b7280; --line: #e5e7eb;
+    --primary: #4338ca; --primary-soft: #eef2ff; --ok: #15803d; --ok-soft: #dcfce7;
+    --bad: #b91c1c; --bad-soft: #fee2e2; --warn: #b45309; --warn-soft: #fef3c7;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 'Sarabun', sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 14px; }
+  h1 { font-size: 1.35rem; margin: 0 0 4px; }
+  .muted { color: var(--muted); }
+  label.field { display: block; font-weight: 600; margin: 14px 0 4px; }
+  input[type=text] { width: 100%; padding: 10px 12px; font: inherit; border: 1px solid #cbd5e1; border-radius: 8px; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 11px 22px; cursor: pointer; background: var(--primary); color: #fff; }
+  button:disabled { opacity: .55; cursor: default; }
+  .error { color: var(--bad); margin-top: 10px; min-height: 1.4em; }
+  .rules { background: var(--primary-soft); border-radius: 8px; padding: 10px 14px; margin-top: 14px; }
+  .rules ul { margin: 4px 0; padding-left: 20px; }
+  .timerbar { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line); }
+  .timerbar .wrap { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 10px; padding-bottom: 10px; }
+  .who { font-size: .92rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clock { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; padding: 2px 12px; border-radius: 8px; background: var(--primary-soft); color: var(--primary); }
+  .clock.warn { background: var(--warn-soft); color: var(--warn); }
+  .clock.danger { background: var(--bad-soft); color: var(--bad); }
+  .q-title { font-weight: 600; margin-bottom: 8px; }
+  .opt { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+  .opt:hover { background: var(--primary-soft); }
+  .opt input { margin-top: 6px; }
+  .saving { font-size: .85rem; color: var(--muted); }
+  .footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .score { font-size: 3rem; font-weight: 700; color: var(--primary); line-height: 1.2; }
+  .rv { padding: 6px 10px; border-radius: 8px; }
+  .rv.correct { background: var(--ok-soft); color: var(--ok); font-weight: 600; }
+  .rv.wrong { background: var(--bad-soft); color: var(--bad); text-decoration: line-through; }
+  .tag { display: inline-block; font-size: .85rem; font-weight: 700; padding: 0 8px; border-radius: 6px; margin-left: 6px; }
+  .tag.ok { background: var(--ok-soft); color: var(--ok); }
+  .tag.bad { background: var(--bad-soft); color: var(--bad); }
+  .tag.none { background: var(--warn-soft); color: var(--warn); }
+  .hidden { display: none !important; }
+  .overlay { position: fixed; inset: 0; background: rgba(15,23,42,.55); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
+  .overlay .card { max-width: 420px; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- หน้าเข้าสอบ -->
+<div id="login" class="wrap">
+  <div class="card">
+    <h1 id="title">กำลังโหลด…</h1>
+    <div id="subtitle" class="muted"></div>
+    <div class="rules">
+      <ul>
+        <li>ข้อสอบ <b id="total">-</b> ข้อ ข้อละ 1 คะแนน เวลาทำ <b id="duration">-</b> นาที</li>
+        <li>เวลาเริ่มนับทันทีที่กดเริ่มทำข้อสอบ ปิดหรือรีเฟรชหน้าเว็บ เวลาก็ยังเดินต่อ</li>
+        <li>เมื่อหมดเวลา ระบบจะส่งคำตอบอัตโนมัติ ข้อที่ยังไม่ได้ตอบจะไม่ได้คะแนน</li>
+        <li>รหัสนักศึกษาหนึ่งรหัสสอบได้ครั้งเดียว</li>
+      </ul>
+    </div>
+    <label class="field" for="name">ชื่อ-สกุล</label>
+    <input type="text" id="name" autocomplete="name">
+    <label class="field" for="sid">รหัสนักศึกษา</label>
+    <input type="text" id="sid" inputmode="numeric">
+    <div class="error" id="loginError"></div>
+    <button id="startBtn" disabled>เริ่มทำข้อสอบ</button>
+  </div>
+</div>
+
+<!-- หน้าทำข้อสอบ -->
+<div id="exam" class="hidden">
+  <div class="timerbar">
+    <div class="wrap">
+      <div class="who" id="who"></div>
+      <div class="clock" id="clock">--:--</div>
+    </div>
+  </div>
+  <div class="wrap">
+    <div id="questions"></div>
+    <div class="card footer">
+      <div><span id="progress"></span><br><span class="saving" id="saving"></span></div>
+      <button id="submitBtn">ส่งคำตอบ</button>
+    </div>
+  </div>
+</div>
+
+<!-- หน้าผลสอบ -->
+<div id="result" class="wrap hidden">
+  <div class="card" style="text-align:center">
+    <div class="muted" id="rWho"></div>
+    <div class="score" id="rScore"></div>
+    <div id="rNote" class="muted"></div>
+  </div>
+  <div id="review"></div>
+</div>
+
+<div id="overlay" class="overlay hidden"><div class="card" id="overlayMsg"></div></div>
+
+<script>
+  var LETTERS = ['ก', 'ข', 'ค', 'ง', 'จ'];
+  var state = { info: null, studentId: '', answers: [], deadline: 0, timer: null, saveTimer: null, submitting: false, done: false };
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function show(id) { ['login', 'exam', 'result'].forEach(function (x) { $(x).classList.toggle('hidden', x !== id); }); window.scrollTo(0, 0); }
+  function overlay(html) { $('overlayMsg').innerHTML = html || ''; $('overlay').classList.toggle('hidden', !html); }
+  function call(fn, args, ok, fail) {
+    var r = google.script.run.withSuccessHandler(ok).withFailureHandler(fail || function (e) { alert(e.message || e); });
+    r[fn].apply(r, args);
+  }
+  function localKey() { return 'exam220104:' + state.studentId; }
+  function saveLocal() { try { localStorage.setItem(localKey(), JSON.stringify(state.answers)); } catch (e) {} }
+  function loadLocal() { try { return JSON.parse(localStorage.getItem(localKey()) || 'null'); } catch (e) { return null; } }
+
+  call('getExamInfo', [], function (info) {
+    state.info = info;
+    $('title').textContent = info.title;
+    $('subtitle').textContent = info.subtitle;
+    $('total').textContent = info.total;
+    $('duration').textContent = info.durationMinutes;
+    $('startBtn').disabled = false;
+  });
+
+  $('startBtn').onclick = function () {
+    var name = $('name').value.trim(), sid = $('sid').value.trim();
+    $('loginError').textContent = '';
+    if (!name) { $('loginError').textContent = 'กรุณากรอกชื่อ-สกุล'; return; }
+    if (!new RegExp(state.info.studentIdPattern).test(sid)) { $('loginError').textContent = 'กรุณากรอกรหัสนักศึกษาเป็นตัวเลข'; return; }
+    if (!confirm('ยืนยันเริ่มทำข้อสอบ? เวลา ' + state.info.durationMinutes + ' นาทีจะเริ่มนับทันที')) return;
+    $('startBtn').disabled = true;
+    overlay('กำลังเตรียมข้อสอบ…');
+    call('startExam', [name, sid], function (res) {
+      overlay('');
+      state.studentId = sid;
+      if (res.state === 'finished') { showResult(res.result, 'รหัสนี้ส่งคำตอบไปแล้ว'); return; }
+      beginExam(res);
+    }, function (e) {
+      overlay('');
+      $('startBtn').disabled = false;
+      $('loginError').textContent = e.message || String(e);
+    });
+  };
+
+  function beginExam(res) {
+    state.deadline = Date.now() + res.remainingMs;
+    var local = loadLocal();
+    state.answers = res.questions.map(function (_, i) {
+      if (local && typeof local[i] === 'number') return local[i];
+      return res.saved[i];
+    });
+    $('who').textContent = res.name + ' (' + res.studentId + ')';
+    $('questions').innerHTML = res.questions.map(function (item, i) {
+      return '<div class="card"><div class="q-title">' + (i + 1) + '. ' + esc(item.q) + '</div>' +
+        item.choices.map(function (c, j) {
+          return '<label class="opt"><input type="radio" name="q' + i + '" value="' + j + '"' +
+            (state.answers[i] === j ? ' checked' : '') + '><span>' + LETTERS[j] + '. ' + esc(c) + '</span></label>';
+        }).join('') + '</div>';
+    }).join('');
+    $('questions').onchange = function (ev) {
+      var m = /^q(\d+)$/.exec(ev.target.name || '');
+      if (!m) return;
+      state.answers[+m[1]] = +ev.target.value;
+      saveLocal();
+      updateProgress();
+      scheduleSave();
+    };
+    updateProgress();
+    show('exam');
+    tick();
+    state.timer = setInterval(tick, 500);
+  }
+
+  function updateProgress() {
+    var n = state.answers.filter(function (a) { return a !== null && a !== undefined; }).length;
+    $('progress').textContent = 'ตอบแล้ว ' + n + ' / ' + state.answers.length + ' ข้อ';
+  }
+
+  function scheduleSave() {
+    clearTimeout(state.saveTimer);
+    $('saving').textContent = 'กำลังบันทึก…';
+    state.saveTimer = setTimeout(function () {
+      call('saveAnswers', [state.studentId, state.answers], function () {
+        $('saving').textContent = 'บันทึกคำตอบแล้ว';
+      }, function () {
+        $('saving').textContent = 'บันทึกไม่สำเร็จ (คำตอบยังอยู่ในเครื่อง)';
+      });
+    }, 1500);
+  }
+
+  function tick() {
+    var left = Math.max(0, state.deadline - Date.now());
+    var s = Math.ceil(left / 1000);
+    $('clock').textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    $('clock').className = 'clock' + (s <= 60 ? ' danger' : s <= 300 ? ' warn' : '');
+    if (left <= 0) timeUp();
+  }
+
+  function lockInputs() {
+    clearInterval(state.timer);
+    clearTimeout(state.saveTimer);
+    Array.prototype.forEach.call(document.querySelectorAll('#questions input'), function (el) { el.disabled = true; });
+    $('submitBtn').disabled = true;
+  }
+
+  function timeUp() {
+    if (state.submitting || state.done) return;
+    lockInputs();
+    submit(true, 0);
+  }
+
+  $('submitBtn').onclick = function () {
+    var left = state.answers.filter(function (a) { return a === null || a === undefined; }).length;
+    var msg = left ? 'ยังไม่ได้ตอบ ' + left + ' ข้อ ต้องการส่งคำตอบเลยหรือไม่?' : 'ยืนยันส่งคำตอบ?';
+    if (!confirm(msg)) return;
+    lockInputs();
+    submit(false, 0);
+  };
+
+  function submit(isAuto, attempt) {
+    state.submitting = true;
+    overlay(isAuto ? '<b>หมดเวลา</b><br>กำลังส่งคำตอบอัตโนมัติ…' : 'กำลังส่งคำตอบ…');
+    call('submitExam', [state.studentId, state.answers, isAuto], function (result) {
+      state.done = true;
+      overlay('');
+      try { localStorage.removeItem(localKey()); } catch (e) {}
+      showResult(result, isAuto ? 'หมดเวลา ระบบส่งคำตอบให้อัตโนมัติ' : '');
+    }, function () {
+      if (attempt < 5) {
+        overlay('เครือข่ายขัดข้อง กำลังลองส่งใหม่ (' + (attempt + 1) + '/5)…');
+        setTimeout(function () { submit(isAuto, attempt + 1); }, 3000);
+      } else {
+        overlay('ส่งคำตอบไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ต<br><br><button onclick="submit(' + isAuto + ',0)">ลองส่งอีกครั้ง</button>');
+      }
+    });
+  }
+
+  function showResult(r, note) {
+    $('rWho').textContent = r.name + ' (' + r.studentId + ')';
+    $('rScore').textContent = r.score + ' / ' + r.total;
+    $('rNote').textContent = [note, 'ตอบ ' + r.answered + ' จาก ' + r.total + ' ข้อ'].filter(Boolean).join(' · ');
+    $('review').innerHTML = !r.review ? '' : r.review.map(function (item, i) {
+      var tag = item.chosen === null ? '<span class="tag none">ไม่ได้ตอบ</span>'
+        : item.chosen === item.correct ? '<span class="tag ok">ถูก</span>' : '<span class="tag bad">ผิด</span>';
+      return '<div class="card"><div class="q-title">' + (i + 1) + '. ' + esc(item.q) + tag + '</div>' +
+        item.choices.map(function (c, j) {
+          var cls = j === item.correct ? 'rv correct' : j === item.chosen ? 'rv wrong' : 'rv';
+          var mark = j === item.correct ? ' ✓ เฉลย' : j === item.chosen ? ' (คำตอบของคุณ)' : '';
+          return '<div class="' + cls + '">' + LETTERS[j] + '. ' + esc(c) + mark + '</div>';
+        }).join('') + '</div>';
+    }).join('');
+    show('result');
+  }
+</script>
+</body>
+</html>
