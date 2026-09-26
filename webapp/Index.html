@@ -45,6 +45,8 @@
   .tag.bad { background: var(--bad-soft); color: var(--bad); }
   .tag.none { background: var(--warn-soft); color: var(--warn); }
   .hidden { display: none !important; }
+  #exam { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  @media print { body { display: none !important; } }
   .overlay { position: fixed; inset: 0; background: rgba(15,23,42,.55); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
   .overlay .card { max-width: 420px; text-align: center; }
 </style>
@@ -61,8 +63,8 @@
         <li>ข้อสอบ <b id="total">-</b> ข้อ ข้อละ 1 คะแนน เวลาทำ <b id="duration">-</b> นาที</li>
         <li>เวลาเริ่มนับทันทีที่กดเริ่มทำข้อสอบ ปิดหรือรีเฟรชหน้าเว็บ เวลาก็ยังเดินต่อ</li>
         <li>เมื่อหมดเวลา ระบบจะส่งคำตอบอัตโนมัติ ข้อที่ยังไม่ได้ตอบจะไม่ได้คะแนน</li>
-        <li>รหัสนักศึกษาหนึ่งรหัสสอบได้ครั้งเดียว</li>
-        <li id="leaveRule"><b>ห้ามออกจากหน้าสอบ</b> (สลับแท็บ สลับแอป ย่อหน้าต่าง ปิดแล้วเปิดใหม่ หรือรีเฟรช) ครั้งแรกจะถูกเตือน ครั้งต่อไประบบจะส่งคำตอบทันทีและตัดสิทธิ์ ทุกครั้งถูกบันทึกไว้</li>
+        <li>รหัสนักศึกษาหนึ่งรหัสสอบได้ครั้งเดียว และคัดลอกข้อความข้อสอบไม่ได้</li>
+        <li id="leaveRule"><b>ห้ามออกจากหน้าสอบ</b> (สลับแท็บ สลับแอป ย่อหน้าต่าง คลิกไปหน้าต่างอื่นหรือนอกพื้นที่ข้อสอบ ปิดแล้วเปิดใหม่ หรือรีเฟรช) ครั้งแรกจะถูกเตือน ครั้งต่อไประบบจะส่งคำตอบทันทีและตัดสิทธิ์ ทุกครั้งถูกบันทึกไว้</li>
       </ul>
     </div>
     <label class="field" for="name">ชื่อ-สกุล</label>
@@ -106,7 +108,7 @@
 <script>
   var LETTERS = ['ก', 'ข', 'ค', 'ง', 'จ'];
   var state = { info: null, studentId: '', answers: [], deadline: 0, timer: null, saveTimer: null, submitting: false, done: false,
-    active: false, leaves: 0, allowedLeaves: 0, hiddenAt: 0, unloading: false };
+    active: false, leaves: 0, allowedLeaves: 0, hiddenAt: 0, unloading: false, suppress: false };
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -127,7 +129,7 @@
     $('total').textContent = info.total;
     $('duration').textContent = info.durationMinutes;
     if (info.allowedLeaves === 0) {
-      $('leaveRule').innerHTML = '<b>ห้ามออกจากหน้าสอบ</b> (สลับแท็บ สลับแอป ย่อหน้าต่าง ปิดแล้วเปิดใหม่ หรือรีเฟรช) ระบบจะส่งคำตอบทันทีและตัดสิทธิ์';
+      $('leaveRule').innerHTML = '<b>ห้ามออกจากหน้าสอบ</b> (สลับแท็บ สลับแอป ย่อหน้าต่าง คลิกไปหน้าต่างอื่นหรือนอกพื้นที่ข้อสอบ ปิดแล้วเปิดใหม่ หรือรีเฟรช) ระบบจะส่งคำตอบทันทีและตัดสิทธิ์';
     }
     $('startBtn').disabled = false;
   });
@@ -186,14 +188,24 @@
     tick();
     state.timer = setInterval(tick, 500);
     if (res.leaves > 0) warnLeave();
+    // สลับไปที่อื่นระหว่างรอโหลดข้อสอบ
+    setTimeout(function () { if (document.visibilityState === 'hidden') checkPresence(); }, 0);
   }
 
   // ---- ตรวจจับการออกจากหน้าสอบ ----
+  // "ออก" = หน้าถูกซ่อน (สลับแท็บ/แอป/ย่อหน้าต่าง) หรือหน้าสอบไม่ได้โฟกัส (คลิกไปหน้าต่างอื่น เช่น เปิด AI แบ่งจอ)
   // การปิดแท็บ/รีเฟรชไม่นับที่นี่ เซิร์ฟเวอร์จะนับตอนเปิดหน้าสอบใหม่ (กันนับซ้ำ)
   window.addEventListener('pagehide', function () { state.unloading = true; });
-  document.addEventListener('visibilitychange', function () {
-    if (!state.active || state.done || state.unloading) return;
-    if (document.visibilityState === 'hidden') {
+  document.addEventListener('visibilitychange', checkPresence);
+  window.addEventListener('blur', function () { setTimeout(checkPresence, 300); });
+  window.addEventListener('focus', function () { setTimeout(checkPresence, 0); });
+
+  function isAway() { return document.visibilityState === 'hidden' || !document.hasFocus(); }
+
+  function checkPresence() {
+    if (!state.active || state.done || state.unloading || state.suppress) return;
+    var away = isAway();
+    if (away && !state.hiddenAt) {
       if (state.submitting) return;
       state.hiddenAt = Date.now();
       state.leaves++;
@@ -204,12 +216,27 @@
       } else {
         call('reportLeave', [state.studentId, state.answers], function () {}, function () {});
       }
-    } else if (state.hiddenAt) {
-      var away = (Date.now() - state.hiddenAt) / 1000;
+    } else if (!away && state.hiddenAt) {
+      var secs = (Date.now() - state.hiddenAt) / 1000;
       state.hiddenAt = 0;
-      call('reportReturn', [state.studentId, away], function () {}, function () {});
+      call('reportReturn', [state.studentId, secs], function () {}, function () {});
       if (!state.submitting) warnLeave();
     }
+  }
+
+  // กล่องยืนยันของเบราว์เซอร์อาจทำให้หน้าเสียโฟกัสชั่วคราว ไม่นับเป็นการออก
+  function safeConfirm(msg) {
+    state.suppress = true;
+    var ok = confirm(msg);
+    setTimeout(function () { state.suppress = false; }, 500);
+    return ok;
+  }
+
+  // ห้ามคัดลอก เลือกข้อความ คลิกขวา และพิมพ์หน้าข้อสอบ
+  ['copy', 'cut', 'contextmenu', 'selectstart', 'dragstart'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      if (!$('exam').classList.contains('hidden')) e.preventDefault();
+    });
   });
 
   function warnLeave() {
@@ -273,7 +300,7 @@
   $('submitBtn').onclick = function () {
     var left = state.answers.filter(function (a) { return a === null || a === undefined; }).length;
     var msg = left ? 'ยังไม่ได้ตอบ ' + left + ' ข้อ ต้องการส่งคำตอบเลยหรือไม่?' : 'ยืนยันส่งคำตอบ?';
-    if (!confirm(msg)) return;
+    if (!safeConfirm(msg)) return;
     lockInputs();
     submit(false, 0);
   };
