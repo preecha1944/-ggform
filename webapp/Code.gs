@@ -25,7 +25,6 @@ const EXAM = {
 const LETTERS = ['ก', 'ข', 'ค', 'ง', 'จ'];
 const SHEET_NAME = 'ผลสอบ';
 const COL = { id: 1, name: 2, start: 3, deadline: 4, submitted: 5, status: 6, score: 7, leaves: 8, leaveLog: 9, firstAnswer: 10 };
-const SAVED_COL = COL.firstAnswer + QUESTIONS.length;
 const STATUS = {
   active: 'กำลังทำ',
   done: 'ส่งแล้ว',
@@ -159,7 +158,7 @@ function saveAnswers(studentId, answers) {
     if (!row) throw new Error('ไม่พบข้อมูลผู้สอบ');
     const rec = readRow_(sheet, row);
     if (rec.status !== STATUS.active || Date.now() > rec.deadline + EXAM.graceSeconds * 1000) return { ok: false };
-    sheet.getRange(row, SAVED_COL).setValue(JSON.stringify(normalize_(answers)));
+    sheet.getRange(row, savedCol_()).setValue(JSON.stringify(normalize_(answers)));
     return { ok: true };
   });
 }
@@ -180,7 +179,7 @@ function reportLeave(studentId, answers) {
       return { leaves: leaves, result: finalize_(sheet, row, rec, inTime ? normalize_(answers) : rec.saved, STATUS.kicked) };
     }
     if (Date.now() <= rec.deadline + EXAM.graceSeconds * 1000) {
-      sheet.getRange(row, SAVED_COL).setValue(JSON.stringify(normalize_(answers)));
+      sheet.getRange(row, savedCol_()).setValue(JSON.stringify(normalize_(answers)));
     }
     return { leaves: leaves, result: null };
   });
@@ -218,7 +217,7 @@ function getDashboardData(key) {
   // อ่านอย่างเดียว ไม่ต้องล็อก (ไม่ให้ขวางการส่งคำตอบของผู้สอบ)
   return (function (sheet) {
     const last = sheet.getLastRow();
-    const rows = last < 2 ? [] : sheet.getRange(2, 1, last - 1, SAVED_COL).getValues();
+    const rows = last < 2 ? [] : sheet.getRange(2, 1, last - 1, savedCol_()).getValues();
     const items = QUESTIONS.map(function (item, i) {
       return { no: i + 1, q: item.q, choices: item.choices, correct: LETTERS.indexOf(item.answer),
         counts: [0, 0, 0, 0, 0], blank: 0 };
@@ -260,6 +259,11 @@ function getDashboardData(key) {
   })(openSheet_());
 }
 
+// คำนวณตอนเรียกใช้ ไม่ใช่ตอนโหลดไฟล์ (Apps Script โหลด Code.gs ก่อน Questions.gs)
+function savedCol_() {
+  return COL.firstAnswer + QUESTIONS.length;
+}
+
 function isTeacher_(key) {
   const expected = PropertiesService.getScriptProperties().getProperty('DASHBOARD_KEY');
   return !!expected && String(key || '') === expected;
@@ -274,7 +278,7 @@ function finalize_(sheet, row, rec, answers, status) {
   });
   sheet.getRange(row, COL.submitted, 1, 3).setValues([[new Date(), status, score]]);
   sheet.getRange(row, COL.firstAnswer, 1, letters.length).setValues([letters]);
-  sheet.getRange(row, SAVED_COL).setValue(JSON.stringify(answers));
+  sheet.getRange(row, savedCol_()).setValue(JSON.stringify(answers));
   rec.status = status;
   rec.saved = answers;
   return buildResult_(rec);
@@ -322,9 +326,9 @@ function normalize_(answers) {
 }
 
 function readRow_(sheet, row) {
-  const v = sheet.getRange(row, 1, 1, SAVED_COL).getValues()[0];
+  const v = sheet.getRange(row, 1, 1, savedCol_()).getValues()[0];
   let saved = [];
-  try { saved = JSON.parse(v[SAVED_COL - 1] || '[]'); } catch (e) { saved = []; }
+  try { saved = JSON.parse(v[savedCol_() - 1] || '[]'); } catch (e) { saved = []; }
   return {
     studentId: String(v[COL.id - 1]),
     name: String(v[COL.name - 1]),
