@@ -34,7 +34,9 @@
    | `Dashboard.html` | กด **+** → HTML แล้วตั้งชื่อ `Dashboard` | `webapp/Dashboard.html` |
 
 3. เลือกฟังก์ชัน `setup` แล้วกด **Run** และอนุญาตสิทธิ์ (Review permissions → เลือกบัญชี → Advanced → Go to … → Allow)
-   ระบบจะสร้าง Google Sheet ชื่อ "ผลสอบ - …" ไว้ใน Drive ของบอส โดยลิงก์ของชีตแสดงใน Execution log
+   - **ถ้าสร้างสคริปต์จากในชีต** (ส่วนขยาย → Apps Script): ผลสอบจะลงแท็บ **ผลสอบ** ในชีตนั้น
+   - **ถ้าสร้างจาก script.google.com**: ระบบจะสร้างไฟล์ชีตใหม่ชื่อ "ผลสอบ - …" ไว้ใน Drive
+   - ทั้งสองแบบ ลิงก์ของชีตจะแสดงใน Execution log
 4. กด **Deploy → New deployment** → ที่รูปเฟือง เลือก **Web app** แล้วตั้งค่า
    - Execute as: **Me**
    - Who has access: **Anyone** (ผู้สอบไม่ต้องล็อกอิน Google)

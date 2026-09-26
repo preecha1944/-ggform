@@ -42,18 +42,25 @@ function setup() {
   if (props.getProperty('SHEET_ID')) {
     Logger.log('มีชีตผลสอบอยู่แล้ว: ' + SpreadsheetApp.openById(props.getProperty('SHEET_ID')).getUrl());
   } else {
-    const ss = SpreadsheetApp.create('ผลสอบ - ' + EXAM.title + ' 220104');
-    const sheet = ss.getSheets()[0].setName(SHEET_NAME);
-    const headers = ['รหัสนักศึกษา', 'ชื่อ-สกุล', 'เวลาเริ่ม', 'กำหนดส่ง', 'เวลาส่ง', 'สถานะ', 'คะแนน (เต็ม ' + QUESTIONS.length + ')',
-      'ออกจากหน้าสอบ (ครั้ง)', 'บันทึกการออกจากหน้าสอบ'];
-    QUESTIONS.forEach(function (_, i) { headers.push('ข้อ ' + (i + 1)); });
-    headers.push('คำตอบที่บันทึกระหว่างสอบ');
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-    sheet.getRange('A:A').setNumberFormat('@');
-    sheet.getRange(1, COL.start, sheet.getMaxRows(), 3).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+    // สคริปต์ที่สร้างจากในชีต (ส่วนขยาย → Apps Script) ใช้ชีตนั้นเลย ไม่อย่างนั้นสร้างไฟล์ชีตใหม่
+    const ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.create('ผลสอบ - ' + EXAM.title + ' 220104');
+    let sheet = ss.getSheetByName(SHEET_NAME);
+    if (!sheet) {
+      const first = ss.getSheets()[0];
+      sheet = ss.getSheets().length === 1 && first.getLastRow() === 0 ? first.setName(SHEET_NAME) : ss.insertSheet(SHEET_NAME);
+    }
+    if (sheet.getLastRow() === 0) {
+      const headers = ['รหัสนักศึกษา', 'ชื่อ-สกุล', 'เวลาเริ่ม', 'กำหนดส่ง', 'เวลาส่ง', 'สถานะ', 'คะแนน (เต็ม ' + QUESTIONS.length + ')',
+        'ออกจากหน้าสอบ (ครั้ง)', 'บันทึกการออกจากหน้าสอบ'];
+      QUESTIONS.forEach(function (_, i) { headers.push('ข้อ ' + (i + 1)); });
+      headers.push('คำตอบที่บันทึกระหว่างสอบ');
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+      sheet.setFrozenRows(1);
+      sheet.getRange('A:A').setNumberFormat('@');
+      sheet.getRange(1, COL.start, sheet.getMaxRows(), 3).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+    }
     props.setProperty('SHEET_ID', ss.getId());
-    Logger.log('สร้างชีตผลสอบแล้ว: ' + ss.getUrl());
+    Logger.log('ตั้งค่าชีตผลสอบแล้ว (แท็บ "' + SHEET_NAME + '"): ' + ss.getUrl());
   }
   showDashboardLink();
 }
