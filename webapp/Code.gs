@@ -3,6 +3,7 @@
  * - ผู้สอบกรอกชื่อ-สกุล และรหัสนักศึกษา แล้วเริ่มทำข้อสอบ
  * - จับเวลาตามที่กำหนด หมดเวลาแล้วส่งคำตอบอัตโนมัติ ตอบได้กี่ข้อก็คิดคะแนนเท่านั้น
  * - เวลาเริ่มและกำหนดส่งเก็บฝั่งเซิร์ฟเวอร์ รีเฟรชหน้าก็ไม่ได้เวลาเพิ่ม และรหัสหนึ่งสอบได้ครั้งเดียว
+ * - ออกจากหน้าสอบ (สลับแท็บ/แอป, ปิดแล้วเปิดใหม่) ครั้งแรกเตือน เกินกำหนดส่งคำตอบทันทีและตัดสิทธิ์
  * - ผลสอบบันทึกลง Google Sheet ผู้สอบเห็นคะแนนและเฉลยทันทีหลังส่ง
  *
  * ติดตั้ง: ดู README.md
@@ -15,15 +16,22 @@ const EXAM = {
   // เผื่อเวลาให้คำตอบที่ส่งอัตโนมัติตอนหมดเวลาเดินทางถึงเซิร์ฟเวอร์ (เน็ตช้า)
   graceSeconds: 60,
   showAnswerKey: true,
+  // จำนวนครั้งที่ออกจากหน้าสอบได้โดยแค่ถูกเตือน ออกครั้งถัดไปจะถูกส่งคำตอบทันที (0 = เด้งออกตั้งแต่ครั้งแรก)
+  allowedLeaves: 1,
   // รหัสนักศึกษา: ตัวเลขอย่างน้อย 5 หลัก (อนุญาต - คั่นได้)
   studentIdPattern: '^[0-9][0-9-]{4,}$',
 };
 
 const LETTERS = ['ก', 'ข', 'ค', 'ง', 'จ'];
 const SHEET_NAME = 'ผลสอบ';
-const COL = { id: 1, name: 2, start: 3, deadline: 4, submitted: 5, status: 6, score: 7, firstAnswer: 8 };
+const COL = { id: 1, name: 2, start: 3, deadline: 4, submitted: 5, status: 6, score: 7, leaves: 8, leaveLog: 9, firstAnswer: 10 };
 const SAVED_COL = COL.firstAnswer + QUESTIONS.length;
-const STATUS = { active: 'กำลังทำ', done: 'ส่งแล้ว', timeout: 'หมดเวลา (ส่งอัตโนมัติ)' };
+const STATUS = {
+  active: 'กำลังทำ',
+  done: 'ส่งแล้ว',
+  timeout: 'หมดเวลา (ส่งอัตโนมัติ)',
+  kicked: 'ตัดสิทธิ์ (ออกจากหน้าสอบเกินกำหนด)',
+};
 
 /** รันครั้งเดียวก่อน Deploy: สร้าง Google Sheet สำหรับเก็บผลสอบ */
 function setup() {
@@ -34,7 +42,8 @@ function setup() {
   }
   const ss = SpreadsheetApp.create('ผลสอบ - ' + EXAM.title + ' 220104');
   const sheet = ss.getSheets()[0].setName(SHEET_NAME);
-  const headers = ['รหัสนักศึกษา', 'ชื่อ-สกุล', 'เวลาเริ่ม', 'กำหนดส่ง', 'เวลาส่ง', 'สถานะ', 'คะแนน (เต็ม ' + QUESTIONS.length + ')'];
+  const headers = ['รหัสนักศึกษา', 'ชื่อ-สกุล', 'เวลาเริ่ม', 'กำหนดส่ง', 'เวลาส่ง', 'สถานะ', 'คะแนน (เต็ม ' + QUESTIONS.length + ')',
+    'ออกจากหน้าสอบ (ครั้ง)', 'บันทึกการออกจากหน้าสอบ'];
   QUESTIONS.forEach(function (_, i) { headers.push('ข้อ ' + (i + 1)); });
   headers.push('คำตอบที่บันทึกระหว่างสอบ');
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
@@ -58,10 +67,14 @@ function getExamInfo() {
     durationMinutes: EXAM.durationMinutes,
     total: QUESTIONS.length,
     studentIdPattern: EXAM.studentIdPattern,
+    allowedLeaves: EXAM.allowedLeaves,
   };
 }
 
-/** เริ่มสอบ หรือกลับเข้ามาทำต่อ (เวลายังคงนับจากตอนเริ่มครั้งแรก) */
+/**
+ * เริ่มสอบ หรือกลับเข้ามาทำต่อ (เวลายังคงนับจากตอนเริ่มครั้งแรก)
+ * การกลับเข้ามาใหม่ (ปิดแท็บ/รีเฟรช) นับเป็นการออกจากหน้าสอบหนึ่งครั้ง
+ */
 function startExam(name, studentId) {
   name = String(name || '').trim();
   studentId = String(studentId || '').trim();
@@ -71,9 +84,10 @@ function startExam(name, studentId) {
   return withLock_(function (sheet) {
     const now = Date.now();
     let row = findRow_(sheet, studentId);
+    const isResume = row > 0;
     if (!row) {
       const deadline = now + EXAM.durationMinutes * 60 * 1000;
-      const values = [studentId, name, new Date(now), new Date(deadline), '', STATUS.active, ''];
+      const values = [studentId, name, new Date(now), new Date(deadline), '', STATUS.active, '', 0, ''];
       QUESTIONS.forEach(function () { values.push(''); });
       values.push('[]');
       sheet.appendRow(values);
@@ -84,11 +98,19 @@ function startExam(name, studentId) {
     if (now > rec.deadline + EXAM.graceSeconds * 1000) {
       return { state: 'finished', result: finalize_(sheet, row, rec, rec.saved, STATUS.timeout) };
     }
+    if (isResume) {
+      const leaves = addLeave_(sheet, row, rec, 'เปิดหน้าสอบใหม่');
+      if (leaves > EXAM.allowedLeaves) {
+        return { state: 'finished', result: finalize_(sheet, row, rec, rec.saved, STATUS.kicked) };
+      }
+    }
     return {
       state: 'active',
       name: rec.name,
       studentId: rec.studentId,
       remainingMs: Math.max(0, rec.deadline - now),
+      leaves: rec.leaves,
+      allowedLeaves: EXAM.allowedLeaves,
       saved: rec.saved,
       questions: QUESTIONS.map(function (item) { return { q: item.q, choices: item.choices }; }),
     };
@@ -104,6 +126,37 @@ function saveAnswers(studentId, answers) {
     if (rec.status !== STATUS.active || Date.now() > rec.deadline + EXAM.graceSeconds * 1000) return { ok: false };
     sheet.getRange(row, SAVED_COL).setValue(JSON.stringify(normalize_(answers)));
     return { ok: true };
+  });
+}
+
+/**
+ * ผู้สอบออกจากหน้าสอบ (สลับแท็บ/แอป/ย่อหน้าต่าง) ระหว่างสอบ
+ * ถ้าเกินจำนวนที่อนุญาต ส่งคำตอบที่มีอยู่ทันทีและตัดสิทธิ์
+ */
+function reportLeave(studentId, answers) {
+  return withLock_(function (sheet) {
+    const row = findRow_(sheet, String(studentId).trim());
+    if (!row) throw new Error('ไม่พบข้อมูลผู้สอบ');
+    const rec = readRow_(sheet, row);
+    if (rec.status !== STATUS.active) return { leaves: rec.leaves, result: buildResult_(rec) };
+    const leaves = addLeave_(sheet, row, rec, 'ออกจากหน้าสอบ');
+    if (leaves > EXAM.allowedLeaves) {
+      const inTime = Date.now() <= rec.deadline + EXAM.graceSeconds * 1000;
+      return { leaves: leaves, result: finalize_(sheet, row, rec, inTime ? normalize_(answers) : rec.saved, STATUS.kicked) };
+    }
+    if (Date.now() <= rec.deadline + EXAM.graceSeconds * 1000) {
+      sheet.getRange(row, SAVED_COL).setValue(JSON.stringify(normalize_(answers)));
+    }
+    return { leaves: leaves, result: null };
+  });
+}
+
+/** ผู้สอบกลับมาที่หน้าสอบ: บันทึกว่าหายไปนานเท่าไร */
+function reportReturn(studentId, awaySeconds) {
+  return withLock_(function (sheet) {
+    const row = findRow_(sheet, String(studentId).trim());
+    if (!row) return;
+    appendLog_(sheet, row, 'กลับมา (หายไป ' + Math.round(Number(awaySeconds) || 0) + ' วินาที)');
   });
 }
 
@@ -136,6 +189,20 @@ function finalize_(sheet, row, rec, answers, status) {
   return buildResult_(rec);
 }
 
+function addLeave_(sheet, row, rec, what) {
+  rec.leaves += 1;
+  sheet.getRange(row, COL.leaves).setValue(rec.leaves);
+  appendLog_(sheet, row, what + ' ครั้งที่ ' + rec.leaves);
+  return rec.leaves;
+}
+
+function appendLog_(sheet, row, text) {
+  const cell = sheet.getRange(row, COL.leaveLog);
+  const time = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'HH:mm:ss');
+  const prev = String(cell.getValue() || '');
+  cell.setValue((prev ? prev + '\n' : '') + time + ' ' + text);
+}
+
 function buildResult_(rec) {
   const answers = rec.saved;
   let score = 0;
@@ -151,6 +218,7 @@ function buildResult_(rec) {
     score: score,
     total: QUESTIONS.length,
     answered: answers.filter(function (a) { return a !== null; }).length,
+    leaves: rec.leaves,
     review: EXAM.showAnswerKey ? review : null,
   };
 }
@@ -171,6 +239,7 @@ function readRow_(sheet, row) {
     name: String(v[COL.name - 1]),
     deadline: new Date(v[COL.deadline - 1]).getTime(),
     status: String(v[COL.status - 1]),
+    leaves: Number(v[COL.leaves - 1]) || 0,
     saved: normalize_(saved),
   };
 }

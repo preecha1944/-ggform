@@ -62,6 +62,7 @@
         <li>เวลาเริ่มนับทันทีที่กดเริ่มทำข้อสอบ ปิดหรือรีเฟรชหน้าเว็บ เวลาก็ยังเดินต่อ</li>
         <li>เมื่อหมดเวลา ระบบจะส่งคำตอบอัตโนมัติ ข้อที่ยังไม่ได้ตอบจะไม่ได้คะแนน</li>
         <li>รหัสนักศึกษาหนึ่งรหัสสอบได้ครั้งเดียว</li>
+        <li id="leaveRule"><b>ห้ามออกจากหน้าสอบ</b> (สลับแท็บ สลับแอป ย่อหน้าต่าง ปิดแล้วเปิดใหม่ หรือรีเฟรช) ครั้งแรกจะถูกเตือน ครั้งต่อไประบบจะส่งคำตอบทันทีและตัดสิทธิ์ ทุกครั้งถูกบันทึกไว้</li>
       </ul>
     </div>
     <label class="field" for="name">ชื่อ-สกุล</label>
@@ -104,7 +105,8 @@
 
 <script>
   var LETTERS = ['ก', 'ข', 'ค', 'ง', 'จ'];
-  var state = { info: null, studentId: '', answers: [], deadline: 0, timer: null, saveTimer: null, submitting: false, done: false };
+  var state = { info: null, studentId: '', answers: [], deadline: 0, timer: null, saveTimer: null, submitting: false, done: false,
+    active: false, leaves: 0, allowedLeaves: 0, hiddenAt: 0, unloading: false };
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -124,6 +126,9 @@
     $('subtitle').textContent = info.subtitle;
     $('total').textContent = info.total;
     $('duration').textContent = info.durationMinutes;
+    if (info.allowedLeaves === 0) {
+      $('leaveRule').innerHTML = '<b>ห้ามออกจากหน้าสอบ</b> (สลับแท็บ สลับแอป ย่อหน้าต่าง ปิดแล้วเปิดใหม่ หรือรีเฟรช) ระบบจะส่งคำตอบทันทีและตัดสิทธิ์';
+    }
     $('startBtn').disabled = false;
   });
 
@@ -138,7 +143,10 @@
     call('startExam', [name, sid], function (res) {
       overlay('');
       state.studentId = sid;
-      if (res.state === 'finished') { showResult(res.result, 'รหัสนี้ส่งคำตอบไปแล้ว'); return; }
+      if (res.state === 'finished') {
+        showResult(res.result, res.result.status.indexOf('ตัดสิทธิ์') === 0 ? 'ถูกตัดสิทธิ์ เพราะออกจากหน้าสอบเกินกำหนด' : 'รหัสนี้ส่งคำตอบไปแล้ว');
+        return;
+      }
       beginExam(res);
     }, function (e) {
       overlay('');
@@ -172,8 +180,55 @@
     };
     updateProgress();
     show('exam');
+    state.active = true;
+    state.leaves = res.leaves;
+    state.allowedLeaves = res.allowedLeaves;
     tick();
     state.timer = setInterval(tick, 500);
+    if (res.leaves > 0) warnLeave();
+  }
+
+  // ---- ตรวจจับการออกจากหน้าสอบ ----
+  // การปิดแท็บ/รีเฟรชไม่นับที่นี่ เซิร์ฟเวอร์จะนับตอนเปิดหน้าสอบใหม่ (กันนับซ้ำ)
+  window.addEventListener('pagehide', function () { state.unloading = true; });
+  document.addEventListener('visibilitychange', function () {
+    if (!state.active || state.done || state.unloading) return;
+    if (document.visibilityState === 'hidden') {
+      if (state.submitting) return;
+      state.hiddenAt = Date.now();
+      state.leaves++;
+      if (state.leaves > state.allowedLeaves) {
+        lockInputs();
+        state.submitting = true;
+        kick(0);
+      } else {
+        call('reportLeave', [state.studentId, state.answers], function () {}, function () {});
+      }
+    } else if (state.hiddenAt) {
+      var away = (Date.now() - state.hiddenAt) / 1000;
+      state.hiddenAt = 0;
+      call('reportReturn', [state.studentId, away], function () {}, function () {});
+      if (!state.submitting) warnLeave();
+    }
+  });
+
+  function warnLeave() {
+    var left = state.allowedLeaves - state.leaves;
+    overlay('<b style="color:var(--bad);font-size:1.2rem">คำเตือน</b><br>ระบบตรวจพบว่าคุณออกจากหน้าสอบ (ครั้งที่ ' + state.leaves + ')<br>' +
+      (left > 0 ? 'ออกได้อีก ' + left + ' ครั้ง หลังจากนั้น' : 'หากออกอีกครั้ง ') +
+      'ระบบจะ<b>ส่งคำตอบทันทีและตัดสิทธิ์</b><br><br><button onclick="overlay(\'\')">กลับไปทำข้อสอบ</button>');
+  }
+
+  function kick(attempt) {
+    overlay('<b>คุณออกจากหน้าสอบเกินจำนวนที่กำหนด</b><br>กำลังส่งคำตอบ…');
+    call('reportLeave', [state.studentId, state.answers], function (res) {
+      state.done = true;
+      try { localStorage.removeItem(localKey()); } catch (e) {}
+      overlay('');
+      showResult(res.result, 'ถูกส่งคำตอบอัตโนมัติ เพราะออกจากหน้าสอบเกินกำหนด');
+    }, function () {
+      setTimeout(function () { kick(attempt + 1); }, Math.min(3000 * (attempt + 1), 15000));
+    });
   }
 
   function updateProgress() {
@@ -202,6 +257,7 @@
   }
 
   function lockInputs() {
+    state.active = false;
     clearInterval(state.timer);
     clearTimeout(state.saveTimer);
     Array.prototype.forEach.call(document.querySelectorAll('#questions input'), function (el) { el.disabled = true; });
