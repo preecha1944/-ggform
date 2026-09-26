@@ -33,28 +33,56 @@ const STATUS = {
   kicked: 'ตัดสิทธิ์ (ออกจากหน้าสอบเกินกำหนด)',
 };
 
-/** รันครั้งเดียวก่อน Deploy: สร้าง Google Sheet สำหรับเก็บผลสอบ */
+/** รันครั้งเดียวก่อน Deploy: สร้าง Google Sheet สำหรับเก็บผลสอบ และรหัสลับของหน้าแดชบอร์ด */
 function setup() {
   const props = PropertiesService.getScriptProperties();
+  if (!props.getProperty('DASHBOARD_KEY')) {
+    props.setProperty('DASHBOARD_KEY', Utilities.getUuid().replace(/-/g, ''));
+  }
   if (props.getProperty('SHEET_ID')) {
     Logger.log('มีชีตผลสอบอยู่แล้ว: ' + SpreadsheetApp.openById(props.getProperty('SHEET_ID')).getUrl());
-    return;
+  } else {
+    const ss = SpreadsheetApp.create('ผลสอบ - ' + EXAM.title + ' 220104');
+    const sheet = ss.getSheets()[0].setName(SHEET_NAME);
+    const headers = ['รหัสนักศึกษา', 'ชื่อ-สกุล', 'เวลาเริ่ม', 'กำหนดส่ง', 'เวลาส่ง', 'สถานะ', 'คะแนน (เต็ม ' + QUESTIONS.length + ')',
+      'ออกจากหน้าสอบ (ครั้ง)', 'บันทึกการออกจากหน้าสอบ'];
+    QUESTIONS.forEach(function (_, i) { headers.push('ข้อ ' + (i + 1)); });
+    headers.push('คำตอบที่บันทึกระหว่างสอบ');
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.getRange('A:A').setNumberFormat('@');
+    sheet.getRange(1, COL.start, sheet.getMaxRows(), 3).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+    props.setProperty('SHEET_ID', ss.getId());
+    Logger.log('สร้างชีตผลสอบแล้ว: ' + ss.getUrl());
   }
-  const ss = SpreadsheetApp.create('ผลสอบ - ' + EXAM.title + ' 220104');
-  const sheet = ss.getSheets()[0].setName(SHEET_NAME);
-  const headers = ['รหัสนักศึกษา', 'ชื่อ-สกุล', 'เวลาเริ่ม', 'กำหนดส่ง', 'เวลาส่ง', 'สถานะ', 'คะแนน (เต็ม ' + QUESTIONS.length + ')',
-    'ออกจากหน้าสอบ (ครั้ง)', 'บันทึกการออกจากหน้าสอบ'];
-  QUESTIONS.forEach(function (_, i) { headers.push('ข้อ ' + (i + 1)); });
-  headers.push('คำตอบที่บันทึกระหว่างสอบ');
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
-  sheet.setFrozenRows(1);
-  sheet.getRange('A:A').setNumberFormat('@');
-  sheet.getRange(1, COL.start, sheet.getMaxRows(), 3).setNumberFormat('dd/MM/yyyy HH:mm:ss');
-  props.setProperty('SHEET_ID', ss.getId());
-  Logger.log('สร้างชีตผลสอบแล้ว: ' + ss.getUrl());
+  showDashboardLink();
 }
 
-function doGet() {
+/** แสดงลิงก์หน้าแดชบอร์ดผู้สอนใน Execution log (รันหลัง Deploy แล้ว) — ห้ามส่งลิงก์นี้ให้นักศึกษา */
+function showDashboardLink() {
+  const key = PropertiesService.getScriptProperties().getProperty('DASHBOARD_KEY');
+  if (!key) {
+    Logger.log('ยังไม่มีรหัสแดชบอร์ด ให้รัน setup ก่อน');
+    return;
+  }
+  let url = '';
+  try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { url = ''; }
+  Logger.log('ลิงก์แดชบอร์ดผู้สอน: ' + (url ? url.replace(/\/dev$/, '/exec') : '<Web app URL>') + '?page=dashboard&key=' + key);
+  if (!url) Logger.log('(ยังไม่ได้ Deploy: ให้นำ Web app URL มาต่อด้วย ?page=dashboard&key=' + key + ')');
+}
+
+function doGet(e) {
+  const params = (e && e.parameter) || {};
+  if (params.page === 'dashboard') {
+    if (!isTeacher_(params.key)) {
+      return HtmlService.createHtmlOutput('<p style="font-family:sans-serif">ไม่มีสิทธิ์เข้าถึงหน้านี้</p>').setTitle('ไม่มีสิทธิ์');
+    }
+    const t = HtmlService.createTemplateFromFile('Dashboard');
+    t.key = params.key;
+    return t.evaluate()
+      .setTitle('แดชบอร์ดผลสอบ - ' + EXAM.title)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle(EXAM.title)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
@@ -174,6 +202,62 @@ function submitExam(studentId, answers, isAuto) {
   });
 }
 
+/**
+ * ข้อมูลหน้าแดชบอร์ดผู้สอน: สรุปภาพรวม และอัตราการผิดรายข้อ (นับเฉพาะผู้ที่ส่งคำตอบแล้ว)
+ * "ผิด" = ไม่ได้คะแนนในข้อนั้น แยกเป็นตอบผิด กับไม่ได้ตอบ
+ */
+function getDashboardData(key) {
+  if (!isTeacher_(key)) throw new Error('ไม่มีสิทธิ์เข้าถึง');
+  // อ่านอย่างเดียว ไม่ต้องล็อก (ไม่ให้ขวางการส่งคำตอบของผู้สอบ)
+  return (function (sheet) {
+    const last = sheet.getLastRow();
+    const rows = last < 2 ? [] : sheet.getRange(2, 1, last - 1, SAVED_COL).getValues();
+    const items = QUESTIONS.map(function (item, i) {
+      return { no: i + 1, q: item.q, choices: item.choices, correct: LETTERS.indexOf(item.answer),
+        counts: [0, 0, 0, 0, 0], blank: 0 };
+    });
+    const statusCount = {};
+    const scores = [];
+    rows.forEach(function (r) {
+      const status = String(r[COL.status - 1]);
+      if (!status) return;
+      statusCount[status] = (statusCount[status] || 0) + 1;
+      if (status === STATUS.active) return;
+      scores.push(Number(r[COL.score - 1]) || 0);
+      items.forEach(function (it, i) {
+        const a = LETTERS.indexOf(String(r[COL.firstAnswer - 1 + i]).trim());
+        if (a < 0) it.blank++; else it.counts[a]++;
+      });
+    });
+    const n = scores.length;
+    items.forEach(function (it) {
+      it.right = it.counts[it.correct];
+      it.wrongAnswer = n - it.right - it.blank;
+      it.wrong = n - it.right;
+      it.wrongPct = n ? Math.round(it.wrong / n * 1000) / 10 : 0;
+    });
+    const sorted = scores.slice().sort(function (a, b) { return a - b; });
+    return {
+      title: EXAM.title,
+      total: QUESTIONS.length,
+      submitted: n,
+      inProgress: statusCount[STATUS.active] || 0,
+      statusCount: statusCount,
+      mean: n ? Math.round(scores.reduce(function (s, x) { return s + x; }, 0) / n * 100) / 100 : 0,
+      median: n ? (n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2) : 0,
+      max: n ? sorted[n - 1] : 0,
+      min: n ? sorted[0] : 0,
+      items: items,
+      updatedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'HH:mm:ss'),
+    };
+  })(openSheet_());
+}
+
+function isTeacher_(key) {
+  const expected = PropertiesService.getScriptProperties().getProperty('DASHBOARD_KEY');
+  return !!expected && String(key || '') === expected;
+}
+
 function finalize_(sheet, row, rec, answers, status) {
   let score = 0;
   const letters = answers.map(function (a, i) {
@@ -254,13 +338,18 @@ function findRow_(sheet, studentId) {
   return 0;
 }
 
-function withLock_(fn) {
+function openSheet_() {
   const id = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
   if (!id) throw new Error('ระบบยังไม่ได้ตั้งค่า (ผู้สอนต้องรันฟังก์ชัน setup ก่อน)');
+  return SpreadsheetApp.openById(id).getSheetByName(SHEET_NAME);
+}
+
+function withLock_(fn) {
+  const sheet = openSheet_();
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    return fn(SpreadsheetApp.openById(id).getSheetByName(SHEET_NAME));
+    return fn(sheet);
   } finally {
     lock.releaseLock();
   }

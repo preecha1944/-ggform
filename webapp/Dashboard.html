@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f6fb; --card: #fff; --text: #1f2937; --muted: #6b7280; --line: #e5e7eb; --track: #eef0f5;
+    --bar: #4f46e5; --bar-soft: #c7c9f5; --ok: #15803d; --ok-soft: #dcfce7;
+    --hi: #b91c1c; --hi-soft: #fee2e2; --mid: #b45309; --mid-soft: #fef3c7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #181b22; --text: #e5e7eb; --muted: #9ca3af; --line: #2a2f3a; --track: #232834;
+      --bar: #8b8cf6; --bar-soft: #4b4d9a; --ok: #4ade80; --ok-soft: #14301f;
+      --hi: #f87171; --hi-soft: #3a1717; --mid: #fbbf24; --mid-soft: #3a2c10;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 'Sarabun', sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.3rem; margin: 0; }
+  .muted { color: var(--muted); }
+  .top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  button { font: inherit; font-weight: 600; border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 8px; padding: 6px 14px; cursor: pointer; }
+  button.on { background: var(--bar); border-color: var(--bar); color: #fff; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .tile .v { font-size: 1.45rem; white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tile .k { font-size: .88rem; color: var(--muted); }
+  .bar-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 10px; }
+  .q { background: var(--card); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; }
+  .q summary { list-style: none; cursor: pointer; padding: 10px 14px; display: grid; grid-template-columns: 58px 1fr auto; gap: 12px; align-items: center; }
+  .q summary::-webkit-details-marker { display: none; }
+  .no { font-weight: 700; }
+  .track { height: 14px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .fill { height: 100%; background: var(--bar); border-radius: 0 4px 4px 0; }
+  .pct { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 150px; text-align: right; }
+  .lvl { font-size: .78rem; font-weight: 700; padding: 0 7px; border-radius: 6px; margin-left: 6px; }
+  .lvl.hi { background: var(--hi-soft); color: var(--hi); }
+  .lvl.mid { background: var(--mid-soft); color: var(--mid); }
+  .lvl.lo { background: var(--ok-soft); color: var(--ok); }
+  .sub { grid-column: 2 / 4; font-size: .88rem; color: var(--muted); margin-top: -6px; }
+  .detail { padding: 4px 14px 14px; border-top: 1px solid var(--line); }
+  .qtext { margin: 10px 0; font-weight: 600; }
+  .opt { display: grid; grid-template-columns: minmax(0, 1fr) 120px 70px; gap: 10px; align-items: center; padding: 3px 0; font-size: .95rem; }
+  .opt .track { height: 10px; }
+  .opt .fill { background: var(--bar-soft); }
+  .opt.correct .fill { background: var(--ok); }
+  .opt.correct .label { color: var(--ok); font-weight: 700; }
+  .opt .n { text-align: right; font-variant-numeric: tabular-nums; }
+  .empty { text-align: center; padding: 40px 16px; }
+  .err { color: var(--hi); }
+  @media (max-width: 560px) {
+    .q summary { grid-template-columns: 48px 1fr; }
+    .pct { grid-column: 1 / 3; text-align: left; min-width: 0; }
+    .sub { grid-column: 1 / 3; margin-top: -8px; }
+    .opt { grid-template-columns: minmax(0, 1fr) 56px 76px; }
+    .opt .n { white-space: nowrap; font-size: .88rem; }
+  }
+</style>
+</head>
+<body data-key="<?= key ?>">
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>แดชบอร์ดผลสอบ</h1>
+      <div class="muted" id="subtitle">กำลังโหลด…</div>
+    </div>
+    <div><span class="muted" id="updated"></span> <button id="refresh">รีเฟรช</button></div>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="bar-head">
+    <div><b>อัตราการผิดรายข้อ</b> <span class="muted">(ผิด = ไม่ได้คะแนน: ตอบผิด + ไม่ได้ตอบ · แตะที่ข้อเพื่อดูว่าเลือกตัวเลือกไหนกี่คน)</span></div>
+    <div><button id="sortPct" class="on">เรียงตาม % ผิด</button> <button id="sortNo">เรียงตามเลขข้อ</button></div>
+  </div>
+  <div id="list"></div>
+</div>
+
+<script>
+  var LETTERS = ['ก', 'ข', 'ค', 'ง', 'จ'];
+  var KEY = document.body.getAttribute('data-key');
+  var data = null, sortBy = 'pct', open = {};
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function pct(x, n) { return n ? Math.round(x / n * 1000) / 10 : 0; }
+
+  function load() {
+    $('refresh').disabled = true;
+    google.script.run.withSuccessHandler(function (d) {
+      data = d;
+      $('refresh').disabled = false;
+      render();
+    }).withFailureHandler(function (e) {
+      $('refresh').disabled = false;
+      $('subtitle').innerHTML = '<span class="err">โหลดข้อมูลไม่สำเร็จ: ' + esc(e.message || e) + '</span>';
+    }).getDashboardData(KEY);
+  }
+
+  function render() {
+    var d = data;
+    $('subtitle').textContent = d.title + ' · ' + d.total + ' ข้อ';
+    $('updated').textContent = 'อัปเดต ' + d.updatedAt;
+    var kicked = 0, timeout = 0;
+    Object.keys(d.statusCount).forEach(function (k) {
+      if (k.indexOf('ตัดสิทธิ์') === 0) kicked += d.statusCount[k];
+      if (k.indexOf('หมดเวลา') === 0) timeout += d.statusCount[k];
+    });
+    var tiles = [
+      ['ส่งแล้ว (คน)', d.submitted], ['กำลังทำอยู่ (คน)', d.inProgress],
+      ['คะแนนเฉลี่ย', d.mean + ' / ' + d.total], ['มัธยฐาน', d.median],
+      ['สูงสุด / ต่ำสุด', d.max + ' / ' + d.min], ['หมดเวลา / ตัดสิทธิ์', timeout + ' / ' + kicked],
+    ];
+    $('tiles').innerHTML = tiles.map(function (t) {
+      return '<div class="tile"><div class="v">' + esc(t[1]) + '</div><div class="k">' + esc(t[0]) + '</div></div>';
+    }).join('');
+
+    if (!d.submitted) {
+      $('list').innerHTML = '<div class="q empty muted">ยังไม่มีผู้ส่งคำตอบ</div>';
+      return;
+    }
+    var items = d.items.slice().sort(sortBy === 'pct'
+      ? function (a, b) { return b.wrongPct - a.wrongPct || a.no - b.no; }
+      : function (a, b) { return a.no - b.no; });
+    $('list').innerHTML = items.map(function (it) {
+      var lvl = it.wrongPct >= 60 ? ['hi', 'ผิดมาก'] : it.wrongPct >= 30 ? ['mid', 'ปานกลาง'] : ['lo', 'ผิดน้อย'];
+      var opts = it.choices.map(function (c, j) {
+        var n = it.counts[j], p = pct(n, d.submitted);
+        return '<div class="opt' + (j === it.correct ? ' correct' : '') + '" title="' + LETTERS[j] + ': ' + n + ' คน (' + p + '%)">' +
+          '<div class="label">' + LETTERS[j] + '. ' + esc(c) + (j === it.correct ? ' ✓ เฉลย' : '') + '</div>' +
+          '<div class="track"><div class="fill" style="width:' + p + '%"></div></div>' +
+          '<div class="n">' + n + ' (' + p + '%)</div></div>';
+      }).join('');
+      if (it.blank) {
+        var pb = pct(it.blank, d.submitted);
+        opts += '<div class="opt" title="ไม่ได้ตอบ: ' + it.blank + ' คน"><div class="label muted">ไม่ได้ตอบ</div>' +
+          '<div class="track"><div class="fill" style="width:' + pb + '%"></div></div><div class="n">' + it.blank + ' (' + pb + '%)</div></div>';
+      }
+      return '<details class="q" data-no="' + it.no + '"' + (open[it.no] ? ' open' : '') + '>' +
+        '<summary title="ข้อ ' + it.no + ': ผิด ' + it.wrong + ' จาก ' + d.submitted + ' คน (' + it.wrongPct + '%)">' +
+        '<div class="no">ข้อ ' + it.no + '</div>' +
+        '<div class="track"><div class="fill" style="width:' + it.wrongPct + '%"></div></div>' +
+        '<div class="pct">ผิด ' + it.wrong + ' คน · ' + it.wrongPct + '%<span class="lvl ' + lvl[0] + '">' + lvl[1] + '</span></div>' +
+        '<div class="sub">ตอบผิด ' + it.wrongAnswer + ' · ไม่ได้ตอบ ' + it.blank + ' · ตอบถูก ' + it.right + ' จาก ' + d.submitted + ' คน</div>' +
+        '</summary><div class="detail"><div class="qtext">' + it.no + '. ' + esc(it.q) + '</div>' + opts + '</div></details>';
+    }).join('');
+    Array.prototype.forEach.call(document.querySelectorAll('details.q'), function (el) {
+      el.addEventListener('toggle', function () { open[el.getAttribute('data-no')] = el.open; });
+    });
+  }
+
+  function setSort(s) {
+    sortBy = s;
+    $('sortPct').classList.toggle('on', s === 'pct');
+    $('sortNo').classList.toggle('on', s === 'no');
+    if (data) render();
+  }
+  $('sortPct').onclick = function () { setSort('pct'); };
+  $('sortNo').onclick = function () { setSort('no'); };
+  $('refresh').onclick = load;
+  load();
+  setInterval(function () { if (!document.hidden) load(); }, 30000);
+</script>
+</body>
+</html>
