@@ -242,6 +242,22 @@ function getDashboardData(key) {
       it.wrong = n - it.right;
       it.wrongPct = n ? Math.round(it.wrong / n * 1000) / 10 : 0;
     });
+    const topics = topicGroups_().map(function (t) {
+      const its = t.questions.map(function (no) { return items[no - 1]; });
+      its.forEach(function (it) { it.topic = t.name; });
+      const wrong = its.reduce(function (s, it) { return s + it.wrong; }, 0);
+      const blank = its.reduce(function (s, it) { return s + it.blank; }, 0);
+      const cells = n * its.length;
+      return {
+        name: t.name,
+        questions: t.questions,
+        wrong: wrong,
+        blank: blank,
+        wrongPct: cells ? Math.round(wrong / cells * 1000) / 10 : 0,
+        // คะแนนเฉลี่ยในกลุ่มนี้ (เต็ม = จำนวนข้อในกลุ่ม)
+        meanScore: n ? Math.round((cells - wrong) / n * 100) / 100 : 0,
+      };
+    });
     const sorted = scores.slice().sort(function (a, b) { return a - b; });
     return {
       title: EXAM.title,
@@ -254,6 +270,7 @@ function getDashboardData(key) {
       max: n ? sorted[n - 1] : 0,
       min: n ? sorted[0] : 0,
       items: items,
+      topics: topics,
       updatedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'HH:mm:ss'),
     };
   })(openSheet_());
@@ -262,6 +279,23 @@ function getDashboardData(key) {
 // คำนวณตอนเรียกใช้ ไม่ใช่ตอนโหลดไฟล์ (Apps Script โหลด Code.gs ก่อน Questions.gs)
 function savedCol_() {
   return COL.firstAnswer + QUESTIONS.length;
+}
+
+// กลุ่มเนื้อหาจาก TOPICS (Questions.gs): ตัดเลขข้อที่ไม่มีจริง/ซ้ำ และรวมข้อที่ไม่อยู่ในกลุ่มใดเป็น "อื่น ๆ"
+function topicGroups_() {
+  const used = {};
+  const groups = (typeof TOPICS === 'undefined' ? [] : TOPICS).map(function (t) {
+    const qs = t.questions.filter(function (no) {
+      if (no < 1 || no > QUESTIONS.length || used[no]) return false;
+      used[no] = true;
+      return true;
+    });
+    return { name: t.name, questions: qs };
+  }).filter(function (t) { return t.questions.length; });
+  const rest = [];
+  for (let no = 1; no <= QUESTIONS.length; no++) if (!used[no]) rest.push(no);
+  if (rest.length) groups.push({ name: 'อื่น ๆ', questions: rest });
+  return groups;
 }
 
 function isTeacher_(key) {
